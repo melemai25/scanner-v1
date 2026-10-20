@@ -127,8 +127,9 @@ def fetch(tickers, interval):
 
 # ── Email ───────────────────────────────────────────────────
 def build_email(results, interval):
+    tag = f"Scanner ({os.environ['SCAN_LABEL']})" if os.environ.get("SCAN_LABEL") else "Scanner"
     if not results:
-        return "Scanner: no setups triggered", "<p>No setups triggered this run.</p>"
+        return f"{tag}: no setups triggered", "<p>No setups triggered this run.</p>"
     rows = "".join(
         f"<tr><td><b>{t}</b></td><td>{', '.join(h)}</td><td>{s['close']:.2f}</td>"
         f"<td>{s['rsi']:.1f}</td><td>{s['macd_hist']:+.3f}</td></tr>"
@@ -141,7 +142,7 @@ def build_email(results, interval):
         <th>Ticker</th><th>Setups</th><th>Close</th><th>RSI</th><th>MACD hist</th></tr>
       {rows}
     </table>"""
-    subject = "Scanner: " + ", ".join(t for t, _, _ in results[:6]) + ("…" if len(results) > 6 else "")
+    subject = f"{tag}: " + ", ".join(t for t, _, _ in results[:6]) + ("…" if len(results) > 6 else "")
     return subject, html
 
 
