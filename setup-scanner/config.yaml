@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────
+#  Setup Scanner config — this is the only file you need to edit.
+# ─────────────────────────────────────────────────────────────
+
+# Who gets the alert email (the sender is set via GitHub secrets).
+email_to: almelemai@gmail.com
+
+# Candle size: 1d (daily), 1h, 30m, 15m, 5m
+interval: 1d
+
+# Tickers to scan. Stocks/ETFs as-is, crypto like BTC-USD, forex like EURUSD=X.
+watchlist:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - META
+  - GOOGL
+  - TSLA
+  - AMD
+  - SPY
+  - QQQ
+
+# ── Setups ──────────────────────────────────────────────────
+# A setup fires when ALL of its conditions are true on the latest
+# completed candle. Each condition is:   <left> <operator> <right>
+#
+# Operators:  <  >  <=  >=  crosses_above  crosses_below
+#
+# Values you can use on either side:
+#   close  open  high  low  volume
+#   rsi            (14-period)      rsi_7, rsi_21 ... any length
+#   macd  macd_signal  macd_hist    (12/26/9)
+#   sma_50  ema_20 ...              any length
+#   avg_volume_20 ...               average volume, any length
+#   a number (30, 70, 0), or a multiple like 2*avg_volume_20
+#
+# Tip: "crosses_*" conditions fire once, on the candle the cross
+# happens. Level conditions (rsi < 30) fire on every run they stay true.
+
+setups:
+  - name: Oversold RSI
+    when:
+      - rsi < 30
+
+  - name: Overbought RSI
+    when:
+      - rsi > 70
+
+  - name: MACD bullish cross
+    when:
+      - macd crosses_above macd_signal
+
+  - name: MACD bearish cross
+    when:
+      - macd crosses_below macd_signal
+
+  - name: Oversold + MACD turning up
+    when:
+      - rsi < 40
+      - macd crosses_above macd_signal
+
+  - name: Golden cross
+    when:
+      - sma_50 crosses_above sma_200
+
+  - name: Breakout on volume
+    when:
+      - close crosses_above sma_50
+      - volume > 2*avg_volume_20
+
+# Send an email even when nothing triggered (handy to confirm it's running).
+email_when_empty: false
