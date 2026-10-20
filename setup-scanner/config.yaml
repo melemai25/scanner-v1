@@ -5,21 +5,32 @@
 # Who gets the alert email (the sender is set via GitHub secrets).
 email_to: almelemai@gmail.com
 
-# Candle size: 1d (daily), 1h, 30m, 15m, 5m
+# Candle size. These setups were tested on DAILY candles — keep 1d.
 interval: 1d
 
-# Tickers to scan. Stocks/ETFs as-is, crypto like BTC-USD, forex like EURUSD=X.
+# Broad, liquid ETFs: where short-term mean reversion is best documented.
+# Individual stocks work too but are noisier (earnings gaps, weaker edge lately).
 watchlist:
-  - AAPL
-  - MSFT
-  - NVDA
-  - AMZN
-  - META
-  - GOOGL
-  - TSLA
-  - AMD
-  - SPY
-  - QQQ
+  - SPY    # S&P 500
+  - QQQ    # Nasdaq 100
+  - IWM    # Russell 2000
+  - DIA    # Dow
+  - XLK    # Tech
+  - XLF    # Financials
+  - XLV    # Health care
+  - XLI    # Industrials
+  - XLY    # Consumer discretionary
+  - XLP    # Consumer staples
+  - XLE    # Energy
+  - XLU    # Utilities
+  - XLB    # Materials
+  - IYR    # Real estate
+  - GLD    # Gold
+  - EFA    # Developed intl
+  - EEM    # Emerging markets
+  # - AAPL
+  # - MSFT
+  # - NVDA
 
 # ── Setups ──────────────────────────────────────────────────
 # A setup fires when ALL of its conditions are true on the latest
@@ -29,45 +40,57 @@ watchlist:
 #
 # Values you can use on either side:
 #   close  open  high  low  volume
-#   rsi            (14-period)      rsi_7, rsi_21 ... any length
+#   rsi            (14-period)      rsi_2, rsi_4 ... any length
 #   macd  macd_signal  macd_hist    (12/26/9)
 #   sma_50  ema_20 ...              any length
 #   avg_volume_20 ...               average volume, any length
+#   ibs                             where the close sits in the day's range (0 = at the low, 100 = at the high)
+#   lowest_close_7  highest_close_7 lowest/highest close of the last N days (incl. today)
 #   a number (30, 70, 0), or a multiple like 2*avg_volume_20
 #
-# Tip: "crosses_*" conditions fire once, on the candle the cross
-# happens. Level conditions (rsi < 30) fire on every run they stay true.
+# EXITS are listed in each setup's comment. The scanner alerts on
+# entries; check your exit rule each day you hold a position.
 
 setups:
-  - name: Oversold RSI
+  # 1) Connors RSI(2) pullback — the best-documented high-win-rate setup.
+  #    SPY 1993–2026: ~77% winners, avg +0.63%/trade (74% since 2009).
+  #    EXIT: when close goes above sma_5.
+  - name: RSI(2) pullback in uptrend
     when:
-      - rsi < 30
+      - close > sma_200
+      - rsi_2 < 10
 
-  - name: Overbought RSI
+  # 2) Same setup, but the close is also near the day's low.
+  #    Fewer signals; IBS < 25 raised avg profit ~21% in Alvarez's test.
+  #    EXIT: when close goes above sma_5.
+  - name: RSI(2) pullback + weak close (A+)
     when:
-      - rsi > 70
+      - close > sma_200
+      - rsi_2 < 10
+      - ibs < 25
 
-  - name: MACD bullish cross
+  # 3) Connors RSI 25 — 20 ETFs, 2009–2012 walk-forward: 74.7% winners, avg +0.92%.
+  #    EXIT: when rsi_4 goes above 55.
+  - name: RSI(4) below 25 in uptrend
     when:
+      - close > sma_200
+      - rsi_4 < 25
+
+  # 4) Double 7s — simpler, weaker evidence than #1 (lagged buy & hold after 2008).
+  #    EXIT: when close is a 7-day high (close >= highest_close_7).
+  - name: Double 7s (7-day low in uptrend)
+    when:
+      - close > sma_200
+      - close <= lowest_close_7
+
+  # 5) Trend-following, not mean reversion: lower win rate (~50%) but bigger winners.
+  #    MACD crossing up while above zero = momentum resuming in an uptrend.
+  #    EXIT: MACD crosses back below its signal line, or your own stop.
+  - name: MACD bullish cross above zero
+    when:
+      - close > sma_200
       - macd crosses_above macd_signal
-
-  - name: MACD bearish cross
-    when:
-      - macd crosses_below macd_signal
-
-  - name: Oversold + MACD turning up
-    when:
-      - rsi < 40
-      - macd crosses_above macd_signal
-
-  - name: Golden cross
-    when:
-      - sma_50 crosses_above sma_200
-
-  - name: Breakout on volume
-    when:
-      - close crosses_above sma_50
-      - volume > 2*avg_volume_20
+      - macd > 0
 
 # Send an email even when nothing triggered (handy to confirm it's running).
 email_when_empty: false
