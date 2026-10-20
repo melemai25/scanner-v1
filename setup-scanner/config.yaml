@@ -86,6 +86,7 @@ watchlist:
   - XOM
   - RKLB
   - BE
+  
 # ── Setups ──────────────────────────────────────────────────
 # A setup fires when ALL of its conditions are true on the latest
 # completed candle. Each condition is:   <left> <operator> <right>
@@ -104,7 +105,7 @@ watchlist:
 #
 # EXITS are listed in each setup's comment. The scanner alerts on
 # entries; check your exit rule each day you hold a position.
-
+ 
 setups:
   # 1) Connors RSI(2) pullback — the best-documented high-win-rate setup.
   #    SPY 1993–2026: ~77% winners, avg +0.63%/trade (74% since 2009).
@@ -113,7 +114,7 @@ setups:
     when:
       - close > sma_200
       - rsi_2 < 10
-
+ 
   # 2) Same setup, but the close is also near the day's low.
   #    Fewer signals; IBS < 25 raised avg profit ~21% in Alvarez's test.
   #    EXIT: when close goes above sma_5.
@@ -122,21 +123,21 @@ setups:
       - close > sma_200
       - rsi_2 < 10
       - ibs < 25
-
+ 
   # 3) Connors RSI 25 — 20 ETFs, 2009–2012 walk-forward: 74.7% winners, avg +0.92%.
   #    EXIT: when rsi_4 goes above 55.
   - name: RSI(4) below 25 in uptrend
     when:
       - close > sma_200
       - rsi_4 < 25
-
+ 
   # 4) Double 7s — simpler, weaker evidence than #1 (lagged buy & hold after 2008).
   #    EXIT: when close is a 7-day high (close >= highest_close_7).
   - name: Double 7s (7-day low in uptrend)
     when:
       - close > sma_200
       - close <= lowest_close_7
-
+ 
   # 5) Trend-following, not mean reversion: lower win rate (~50%) but bigger winners.
   #    MACD crossing up while above zero = momentum resuming in an uptrend.
   #    EXIT: MACD crosses back below its signal line, or your own stop.
@@ -145,51 +146,59 @@ setups:
       - close > sma_200
       - macd crosses_above macd_signal
       - macd > 0
-
-  # Bear cases
-    # Bearish mirror of #1: a short bounce inside a downtrend.
-  # Short-side win rates ran ~65-68% in Connors' ETF tests (lower than longs).
-  # EXIT (cover): when close goes below sma_5.
-  - name: "BEARISH: RSI(2) bounce in downtrend"
-    when:
-      - close < sma_200
-      - rsi_2 > 90
-
-  # Bearish mirror of #2: the bounce also closes near the day's high.
-  - name: "BEARISH: RSI(2) bounce + strong close (A+)"
-    when:
-      - close < sma_200
-      - rsi_2 > 90
-      - ibs > 75
-
-  # Bearish mirror of #5: momentum rolling over inside a downtrend.
-  # Bearish mirror of #1: a short bounce inside a downtrend.
-  # Short-side win rates ran ~65-68% in Connors' ETF tests (lower than longs).
-  # EXIT (cover): when close goes below sma_5.
-  - name: "BEARISH: RSI(2) bounce in downtrend"
-    when:
-      - close < sma_200
-      - rsi_2 > 90
-
-  # Bearish mirror of #2: the bounce also closes near the day's high.
-  - name: "BEARISH: RSI(2) bounce + strong close (A+)"
-    when:
-      - close < sma_200
-      - rsi_2 > 90
-      - ibs > 75
-
-  # Bearish mirror of #5: momentum rolling over inside a downtrend.
-  - name: "BEARISH: MACD cross below zero"
-    when:
-      - close < sma_200
-      - macd crosses_below macd_signal
-      - macd < 0
-
+ 
   - name: "WARNING: overbought"
     when:
       - rsi_2 > 95
       - ibs > 80
-
+ 
+# ── Speculative setups ──────────────────────────────────────
+# Momentum & breakout trades: shown in their own section of the email.
+# These win LESS often (~35-50%) but the winners are much bigger.
+# Extra values these use:
+#   prior_high_252   highest close of the last N days, NOT counting today (so a breakout can cross it)
+#   return_252_21    % return from 12 months ago to 1 month ago (classic momentum measure)
+#   return_42        % return over the last 42 days (any N)
+#   rs_rank          0-100: how this ticker's 12-1m return ranks vs the rest of YOUR watchlist
+ 
+speculative_setups:
+  # 1) 52-week-high breakout by a momentum leader.
+  #    George & Hwang: nearness to the 52-week high predicted returns better than
+  #    classic momentum (1963–2001; a 1998–2007 replication found ~3%/month spread).
+  #    O'Neil's CAN SLIM screen (also near-high + top-30% relative strength) is AAII's
+  #    best long-run screen: ~19%/yr since 1998 vs ~6% for the S&P (price gains, to May 2023).
+  #    EXIT: wide trailing stop (10-15% from the highest close) — tighter stops tested worse.
+  - name: Momentum leader, new 52-week high
+    when:
+      - close crosses_above prior_high_252
+      - rs_rank >= 70
+      - close > sma_200
+ 
+  # 2) Turtle-style 55-day breakout in an established uptrend (trend following).
+  #    Breakout systems win ~40-50% of the time; profit factor ~2.7 in a 2004+ ETF test.
+  #    EXIT: close below the 20-day low (close < prior_low_20), or a trailing stop.
+  - name: 55-day breakout in uptrend
+    when:
+      - close crosses_above prior_high_55
+      - sma_50 > sma_200
+ 
+  # 3) Time-series momentum turns on: 12-1 month return flips positive.
+  #    Moskowitz/Ooi/Pedersen 2012; tested on US stocks 1927–2017 (~0.8%/month long-short).
+  #    EXIT: when return_252_21 drops back below 0 (re-check monthly).
+  - name: 12-month momentum turns positive
+    when:
+      - return_252_21 crosses_above 0
+      - close > sma_50
+ 
+  # 4) High & tight flag: doubled in ~2-3 months, paused, then breaks the pause high.
+  #    Bulkowski (1,028 trades): avg rise 39%, 15% fail; but ranks only 30/39 overall. Rare.
+  #    EXIT: stop just under the flag's low (prior_low_20); trail once up 20%+.
+  - name: High & tight flag breakout
+    when:
+      - close crosses_above prior_high_15
+      - prior_high_15 >= 1.9*lowest_close_60
+ 
 # Send an email even when nothing triggered (handy to confirm it's running).
 email_when_empty: false
+
 
