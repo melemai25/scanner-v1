@@ -8,30 +8,84 @@ email_to: almelemai@gmail.com
 # Candle size. These setups were tested on DAILY candles — keep 1d.
 interval: 1d
 
-# Broad, liquid ETFs: where short-term mean reversion is best documented.
-# Individual stocks work too but are noisier (earnings gaps, weaker edge lately).
+# One ticker per line, same indentation. Anything Yahoo Finance knows works
+# (BRK-B for Berkshire, BTC-USD for bitcoin). Put # in front to switch one off.
 watchlist:
+  # ── Indexes & sector ETFs ──
   - SPY    # S&P 500
   - QQQ    # Nasdaq 100
   - IWM    # Russell 2000
   - DIA    # Dow
+  - SMH    # Semiconductors
+  - SOXX   # Semiconductors (broader)
+  - DRAM   # Memory (launched Apr 2026, see note)
+  - IGV    # Software
   - XLK    # Tech
+  - XLE    # Energy
   - XLF    # Financials
   - XLV    # Health care
   - XLI    # Industrials
   - XLY    # Consumer discretionary
-  - XLP    # Consumer staples
-  - XLE    # Energy
-  - XLU    # Utilities
-  - XLB    # Materials
-  - IYR    # Real estate
+  - XLU    # Utilities (AI power demand)
   - GLD    # Gold
-  - EFA    # Developed intl
-  - EEM    # Emerging markets
-  # - AAPL
-  # - MSFT
-  # - NVDA
 
+  # ── Mega caps ──
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - GOOGL
+  - META
+  - TSLA
+  - AVGO
+  - NFLX
+  - BRK-B
+  - JPM
+  - LLY
+  - COST
+
+  # ── AI: chips & hardware ──
+  - AMD
+  - MU
+  - TSM
+  - ARM
+  - MRVL
+  - ALAB
+  - CRDO
+  - SMCI
+  - DELL
+  - ANET
+
+  # ── AI: optical & networking ──
+  - AAOI
+  - COHR
+  - LITE
+
+  # ── AI: infrastructure, power & neoclouds ──
+  - IREN
+  - CRWV
+  - NBIS
+  - VRT
+  - CIFR
+  - APLD
+
+  # ── AI: software ──
+  - PLTR
+  - ORCL
+  - CRM
+  - NOW
+  - SNOW
+  - PATH
+
+  # ── Other ──
+  - COST
+  - SOFI
+  - HOOD
+  - GLD
+  - GDX
+  - XOM
+  - RKLB
+  - BE
 # ── Setups ──────────────────────────────────────────────────
 # A setup fires when ALL of its conditions are true on the latest
 # completed candle. Each condition is:   <left> <operator> <right>
