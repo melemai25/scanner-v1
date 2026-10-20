@@ -52,6 +52,14 @@ def series_for(token, df, cache):
     elif m := re.fullmatch(r"(lowest|highest)_close_(\d+)", token):
         roll = df["Close"].rolling(int(m.group(2)))
         out = roll.min() if m.group(1) == "lowest" else roll.max()
+    elif m := re.fullmatch(r"prior_(high|low)_(\d+)", token):  # N-day high/low close, NOT counting today
+        roll = df["Close"].shift(1).rolling(int(m.group(2)))
+        out = roll.max() if m.group(1) == "high" else roll.min()
+    elif m := re.fullmatch(r"return_(\d+)(?:_(\d+))?", token):  # % change from N bars ago (to M bars ago)
+        n, skip = int(m.group(1)), int(m.group(2) or 0)
+        out = 100 * (df["Close"].shift(skip) / df["Close"].shift(n) - 1)
+    elif token == "rs_rank":
+        raise ValueError("rs_rank needs the whole watchlist; it is filled in by main()")
     elif token in ("macd", "macd_signal", "macd_hist"):
         line, sig, hist = macd(df["Close"])
         cache.update(macd=line, macd_signal=sig, macd_hist=hist)
@@ -95,15 +103,28 @@ def check(condition, df, cache):
     }[op]
 
 
-def scan_ticker(df, setups):
-    cache, hits = {}, []
-    for setup in setups:
-        if all(check(c, df, cache) for c in setup["when"]):
-            hits.append(setup["name"])
+RS_LOOKBACK = "return_252_21"  # 12-month return skipping the latest month (classic momentum)
+
+
+def rs_ranks(data):
+    """Percentile (0-100) of each ticker's 12-1 month return vs the rest of the watchlist, per day."""
+    rets = pd.DataFrame({t: series_for(RS_LOOKBACK, df, {}) for t, df in data.items()})
+    return rets.rank(axis=1, pct=True) * 100
+
+
+def scan_ticker(df, sections, extras=None):
+    """sections: {"core": [setups], "speculative": [setups]} -> {"core": [names], ...}"""
+    cache = dict(extras or {})
+    hits = {sec: [s["name"] for s in setups if all(check(c, df, cache) for c in s["when"])]
+            for sec, setups in sections.items()}
+    last = lambda tok: series_for(tok, df, cache).iloc[-1]
     snapshot = {
-        "close": df["Close"].iloc[-1],
-        "rsi": series_for("rsi", df, cache).iloc[-1],
-        "macd_hist": series_for("macd_hist", df, cache).iloc[-1],
+        "close": last("close"),
+        "rsi": last("rsi"),
+        "macd_hist": last("macd_hist"),
+        "ret_12_1": last(RS_LOOKBACK),
+        "rs_rank": cache["rs_rank"].iloc[-1] if "rs_rank" in cache else float("nan"),
+        "off_high": 100 * (last("close") / last("highest_close_252") - 1),
     }
     return hits, snapshot
 
@@ -126,22 +147,41 @@ def fetch(tickers, interval):
 
 
 # ── Email ───────────────────────────────────────────────────
+TABLE = '<table cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:14px">'
+HEAD = '<tr style="background:#f0f0f0;text-align:left">'
+
+SECTIONS = {  # section -> (title, note, [(column, format)])
+    "core": ("Core Setups", "High win-rate pullbacks in uptrends.",
+             [("Close", "{close:.2f}"), ("RSI", "{rsi:.1f}"), ("MACD hist", "{macd_hist:+.3f}")]),
+    "speculative": ("Speculative Setups",
+                    "Momentum/breakout trades: lower win rate, bigger winners. Size small, use a stop.",
+                    [("Close", "{close:.2f}"), ("12-1m return", "{ret_12_1:+.0f}%"),
+                     ("RS rank", "{rs_rank:.0f}"), ("Off 52w high", "{off_high:+.1f}%")]),
+}
+
+
 def build_email(results, interval):
+    """results: [(ticker, {"core": [...], "speculative": [...]}, snapshot)]"""
     tag = f"Scanner ({os.environ['SCAN_LABEL']})" if os.environ.get("SCAN_LABEL") else "Scanner"
     if not results:
         return f"{tag}: no setups triggered", "<p>No setups triggered this run.</p>"
-    rows = "".join(
-        f"<tr><td><b>{t}</b></td><td>{', '.join(h)}</td><td>{s['close']:.2f}</td>"
-        f"<td>{s['rsi']:.1f}</td><td>{s['macd_hist']:+.3f}</td></tr>"
-        for t, h, s in results
-    )
-    html = f"""
-    <p>{sum(len(h) for _, h, _ in results)} setup(s) on {len(results)} ticker(s) — {interval} candles</p>
-    <table cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:14px">
-      <tr style="background:#f0f0f0;text-align:left">
-        <th>Ticker</th><th>Setups</th><th>Close</th><th>RSI</th><th>MACD hist</th></tr>
-      {rows}
-    </table>"""
+
+    total = sum(len(names) for _, hits, _ in results for names in hits.values())
+    html = f"<p>{total} setup(s) on {len(results)} ticker(s) — {interval} candles</p>"
+    for sec, (title, note, cols) in SECTIONS.items():
+        rows = [(t, hits[sec], s) for t, hits, s in results if hits.get(sec)]
+        if not rows:
+            continue
+        head = "".join(f"<th>{c}</th>" for c, _ in cols)
+        body = "".join(
+            f"<tr><td><b>{t}</b></td><td>{', '.join(names)}</td>"
+            + "".join(f"<td>{fmt.format(**s)}</td>" for _, fmt in cols) + "</tr>"
+            for t, names, s in rows
+        )
+        html += (f"<h3 style='font-family:sans-serif;margin:18px 0 2px'>{title}</h3>"
+                 f"<p style='font-family:sans-serif;color:#666;margin:0 0 6px'>{note}</p>"
+                 f"{TABLE}{HEAD}<th>Ticker</th><th>Setups</th>{head}</tr>{body}</table>")
+
     subject = f"{tag}: " + ", ".join(t for t, _, _ in results[:6]) + ("…" if len(results) > 6 else "")
     return subject, html
 
@@ -164,9 +204,11 @@ def main():
 
     try:
         cfg = yaml.safe_load(Path(args.config).read_text())
-        for s in cfg["setups"]:  # fail fast on typos
-            for c in s["when"]:
-                parse(c)
+        sections = {"core": cfg["setups"] or [], "speculative": cfg.get("speculative_setups") or []}
+        for setups in sections.values():  # fail fast on typos
+            for s in setups:
+                for c in s["when"]:
+                    parse(c)
     except (yaml.YAMLError, KeyError, TypeError, ValueError) as e:
         sys.exit(f"CONFIG PROBLEM in config.yaml (check spacing/indentation): {e}")
 
@@ -179,12 +221,13 @@ def main():
     if not data:
         sys.exit("NO DATA: Yahoo returned nothing for any ticker. Usually a temporary Yahoo "
                  "outage or rate limit; re-run in a few minutes.")
+    ranks = rs_ranks(data)
     results = []
     for ticker, df in data.items():
-        hits, snap = scan_ticker(df, cfg["setups"])
-        if hits:
+        hits, snap = scan_ticker(df, sections, {"rs_rank": ranks[ticker].reindex(df.index)})
+        if any(hits.values()):
             results.append((ticker, hits, snap))
-            print(f"  ✓ {ticker}: {', '.join(hits)}")
+            print(f"  ✓ {ticker}: {', '.join(n for names in hits.values() for n in names)}")
 
     print(f"{len(results)} ticker(s) with setups")
     if args.dry_run or (not results and not cfg.get("email_when_empty")):
