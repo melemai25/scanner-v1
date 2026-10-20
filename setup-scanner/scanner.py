@@ -46,6 +46,12 @@ def series_for(token, df, cache):
         out = pd.Series(float(token), index=df.index)
     elif token in ("close", "open", "high", "low", "volume"):
         out = df[token.capitalize()]
+    elif token == "ibs":  # internal bar strength: where the close sits in today's range, 0-100
+        rng = (df["High"] - df["Low"]).replace(0, float("nan"))
+        out = 100 * (df["Close"] - df["Low"]) / rng
+    elif m := re.fullmatch(r"(lowest|highest)_close_(\d+)", token):
+        roll = df["Close"].rolling(int(m.group(2)))
+        out = roll.min() if m.group(1) == "lowest" else roll.max()
     elif token in ("macd", "macd_signal", "macd_hist"):
         line, sig, hist = macd(df["Close"])
         cache.update(macd=line, macd_signal=sig, macd_hist=hist)
