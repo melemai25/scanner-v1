@@ -155,14 +155,25 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="print results, don't email")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
-    for s in cfg["setups"]:  # fail fast on typos
-        for c in s["when"]:
-            parse(c)
+    try:
+        cfg = yaml.safe_load(Path(args.config).read_text())
+        for s in cfg["setups"]:  # fail fast on typos
+            for c in s["when"]:
+                parse(c)
+    except (yaml.YAMLError, KeyError, TypeError, ValueError) as e:
+        sys.exit(f"CONFIG PROBLEM in config.yaml (check spacing/indentation): {e}")
+
+    if not args.dry_run and not (os.environ.get("GMAIL_ADDRESS") and os.environ.get("GMAIL_APP_PASSWORD")):
+        sys.exit("MISSING SECRETS: add GMAIL_ADDRESS and GMAIL_APP_PASSWORD under "
+                 "Settings → Secrets and variables → Actions (names must match exactly).")
 
     interval = cfg.get("interval", "1d")
+    data = fetch(cfg["watchlist"], interval)
+    if not data:
+        sys.exit("NO DATA: Yahoo returned nothing for any ticker. Usually a temporary Yahoo "
+                 "outage or rate limit; re-run in a few minutes.")
     results = []
-    for ticker, df in fetch(cfg["watchlist"], interval).items():
+    for ticker, df in data.items():
         hits, snap = scan_ticker(df, cfg["setups"])
         if hits:
             results.append((ticker, hits, snap))
@@ -171,7 +182,11 @@ def main():
     print(f"{len(results)} ticker(s) with setups")
     if args.dry_run or (not results and not cfg.get("email_when_empty")):
         return
-    send_email(cfg.get("email_to") or os.environ["GMAIL_ADDRESS"], *build_email(results, interval))
+    try:
+        send_email(cfg.get("email_to") or os.environ["GMAIL_ADDRESS"], *build_email(results, interval))
+    except smtplib.SMTPAuthenticationError:
+        sys.exit("GMAIL LOGIN FAILED: GMAIL_APP_PASSWORD must be the 16-character app password "
+                 "(not your normal Gmail password), and GMAIL_ADDRESS must be the same account.")
     print("Email sent.")
 
 
