@@ -146,5 +146,50 @@ setups:
       - macd crosses_above macd_signal
       - macd > 0
 
+  # Bear cases
+    # Bearish mirror of #1: a short bounce inside a downtrend.
+  # Short-side win rates ran ~65-68% in Connors' ETF tests (lower than longs).
+  # EXIT (cover): when close goes below sma_5.
+  - name: "BEARISH: RSI(2) bounce in downtrend"
+    when:
+      - close < sma_200
+      - rsi_2 > 90
+
+  # Bearish mirror of #2: the bounce also closes near the day's high.
+  - name: "BEARISH: RSI(2) bounce + strong close (A+)"
+    when:
+      - close < sma_200
+      - rsi_2 > 90
+      - ibs > 75
+
+  # Bearish mirror of #5: momentum rolling over inside a downtrend.
+  # Bearish mirror of #1: a short bounce inside a downtrend.
+  # Short-side win rates ran ~65-68% in Connors' ETF tests (lower than longs).
+  # EXIT (cover): when close goes below sma_5.
+  - name: "BEARISH: RSI(2) bounce in downtrend"
+    when:
+      - close < sma_200
+      - rsi_2 > 90
+
+  # Bearish mirror of #2: the bounce also closes near the day's high.
+  - name: "BEARISH: RSI(2) bounce + strong close (A+)"
+    when:
+      - close < sma_200
+      - rsi_2 > 90
+      - ibs > 75
+
+  # Bearish mirror of #5: momentum rolling over inside a downtrend.
+  - name: "BEARISH: MACD cross below zero"
+    when:
+      - close < sma_200
+      - macd crosses_below macd_signal
+      - macd < 0
+
+  - name: "WARNING: overbought"
+    when:
+      - rsi_2 > 95
+      - ibs > 80
+
 # Send an email even when nothing triggered (handy to confirm it's running).
 email_when_empty: false
+
