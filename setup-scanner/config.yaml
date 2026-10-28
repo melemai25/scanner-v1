@@ -201,4 +201,8 @@ speculative_setups:
 # Send an email even when nothing triggered (handy to confirm it's running).
 email_when_empty: false
 
+# Add the forced order flow scan (flow_scan.py) below the setups in every email.
+# It uses the same watchlist. Set to false to turn it off.
+flow_scan: true
+
 

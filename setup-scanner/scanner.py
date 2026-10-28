@@ -1,7 +1,9 @@
-"""Setup Scanner — checks a watchlist for the setups in config.yaml and emails hits.
+"""Setup Scanner — checks a watchlist for the setups in config.yaml and emails hits,
+followed by the forced order flow scan (flow_scan.py) for the same watchlist.
 
 Run locally:   python scanner.py --dry-run      (prints results, no email)
 Env vars:      GMAIL_ADDRESS, GMAIL_APP_PASSWORD (sender account)
+               FLOW_ONLY=1   skip the setups and send only the forced flow scan
 """
 import argparse
 import os
@@ -160,11 +162,16 @@ SECTIONS = {  # section -> (title, note, [(column, format)])
 }
 
 
-def build_email(results, interval):
-    """results: [(ticker, {"core": [...], "speculative": [...]}, snapshot)]"""
+def build_email(results, interval, flow=None, setups_ran=True):
+    """results: [(ticker, {"core": [...], "speculative": [...]}, snapshot)]
+    flow: (html, subject_bit) from run_flow(), shown below the setups, or None."""
     tag = f"Scanner ({os.environ['SCAN_LABEL']})" if os.environ.get("SCAN_LABEL") else "Scanner"
+    flow_html, flow_bit = flow or ("", "")
+    if not setups_ran:
+        return f"{tag}: {flow_bit or 'forced flow'}", flow_html
     if not results:
-        return f"{tag}: no setups triggered", "<p>No setups triggered this run.</p>"
+        subject = f"{tag}: no setups triggered" + (f" | {flow_bit}" if flow_bit else "")
+        return subject, "<p>No setups triggered this run.</p>" + flow_html
 
     total = sum(len(names) for _, hits, _ in results for names in hits.values())
     html = f"<p>{total} setup(s) on {len(results)} ticker(s) — {interval} candles</p>"
@@ -183,7 +190,9 @@ def build_email(results, interval):
                  f"{TABLE}{HEAD}<th>Ticker</th><th>Setups</th>{head}</tr>{body}</table>")
 
     subject = f"{tag}: " + ", ".join(t for t, _, _ in results[:6]) + ("…" if len(results) > 6 else "")
-    return subject, html
+    if flow_bit:
+        subject += f" | {flow_bit}"
+    return subject, html + flow_html
 
 
 def send_email(to, subject, html):
@@ -193,6 +202,23 @@ def send_email(to, subject, html):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(sender, password)
         s.send_message(msg)
+
+
+# ── Forced flow ─────────────────────────────────────────────
+def run_flow(watchlist):
+    """Runs flow_scan.py on the watchlist. Returns (html, subject_bit, text).
+    Never raises: if the flow scan breaks, the setup email still goes out with a note."""
+    try:
+        import flow_scan
+        res = flow_scan.scan(watchlist=watchlist, progress=False)
+        top = ", ".join(f"{r['t']} {r['marks']}" for r in res["active"][:3])
+        bit = f"Flow: {top}" if top else "Flow: nothing notable"
+        return flow_scan.html_report(res), bit, flow_scan.text_report(res)
+    except Exception as e:  # keep the setups email alive no matter what
+        import traceback
+        traceback.print_exc()
+        msg = f"Forced flow scan failed this run: {type(e).__name__}: {e}"
+        return f"<p style='font-family:sans-serif;color:#b06000'>{msg}</p>", "", msg
 
 
 # ── Main ────────────────────────────────────────────────────
@@ -217,23 +243,34 @@ def main():
                  "Settings → Secrets and variables → Actions (names must match exactly).")
 
     interval = cfg.get("interval", "1d")
-    data = fetch(cfg["watchlist"], interval)
-    if not data:
-        sys.exit("NO DATA: Yahoo returned nothing for any ticker. Usually a temporary Yahoo "
-                 "outage or rate limit; re-run in a few minutes.")
-    ranks = rs_ranks(data)
+    flow_only = os.environ.get("FLOW_ONLY") == "1"
+    flow_on = flow_only or cfg.get("flow_scan", True)
     results = []
-    for ticker, df in data.items():
-        hits, snap = scan_ticker(df, sections, {"rs_rank": ranks[ticker].reindex(df.index)})
-        if any(hits.values()):
-            results.append((ticker, hits, snap))
-            print(f"  ✓ {ticker}: {', '.join(n for names in hits.values() for n in names)}")
+    if not flow_only:
+        data = fetch(cfg["watchlist"], interval)
+        if not data:
+            sys.exit("NO DATA: Yahoo returned nothing for any ticker. Usually a temporary Yahoo "
+                     "outage or rate limit; re-run in a few minutes.")
+        ranks = rs_ranks(data)
+        for ticker, df in data.items():
+            hits, snap = scan_ticker(df, sections, {"rs_rank": ranks[ticker].reindex(df.index)})
+            if any(hits.values()):
+                results.append((ticker, hits, snap))
+                print(f"  ✓ {ticker}: {', '.join(n for names in hits.values() for n in names)}")
+        print(f"{len(results)} ticker(s) with setups")
 
-    print(f"{len(results)} ticker(s) with setups")
-    if args.dry_run or (not results and not cfg.get("email_when_empty")):
+    flow = None
+    if flow_on:
+        print("Running forced flow scan...")
+        html, bit, text = run_flow(cfg["watchlist"])
+        print(text)
+        flow = (html, bit)
+
+    if args.dry_run or (not results and not flow_on and not cfg.get("email_when_empty")):
         return
     try:
-        send_email(cfg.get("email_to") or os.environ["GMAIL_ADDRESS"], *build_email(results, interval))
+        send_email(cfg.get("email_to") or os.environ["GMAIL_ADDRESS"],
+                   *build_email(results, interval, flow, setups_ran=not flow_only))
     except smtplib.SMTPAuthenticationError:
         sys.exit("GMAIL LOGIN FAILED: GMAIL_APP_PASSWORD must be the 16-character app password "
                  "(not your normal Gmail password), and GMAIL_ADDRESS must be the same account.")
