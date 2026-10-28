@@ -5,31 +5,38 @@ on:
     - cron: "0 22 * * 1-5"    # After close: 22:00 UTC = 12:00 noon Hawaii
     - cron: "30 12 * * 1-5"   # Pre-market: 8:30 AM New York during daylight time (Mar–Nov)
     - cron: "30 13 * * 1-5"   # Pre-market: 8:30 AM New York during standard time (Nov–Mar)
-  workflow_dispatch: {}       # "Run workflow" button for manual runs
+    - cron: "0 19 * * 1-5"    # Near close: 3:00 PM New York during daylight time (forced flow only)
+    - cron: "0 20 * * 1-5"    # Near close: 3:00 PM New York during standard time (forced flow only)
+  workflow_dispatch: {}       # "Run workflow" button / iPhone shortcut: setups + forced flow
 
 jobs:
   scan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: setup-scanner
     steps:
       - uses: actions/checkout@v5
 
-      # Only one of the two pre-market times is 8:30 AM in New York on a given day;
+      # Each pair of times above has only one that matches New York time on a given day;
       # this skips the other one, and labels each email.
       - name: Pick scan type
         id: gate
         run: |
           offset=$(TZ=America/New_York date +%z)
+          flow_only=0
           case "${{ github.event.schedule }}" in
             "30 12 * * 1-5") [ "$offset" = "-0400" ] && label="Pre-market" || label=skip ;;
             "30 13 * * 1-5") [ "$offset" = "-0500" ] && label="Pre-market" || label=skip ;;
+            "0 19 * * 1-5")  [ "$offset" = "-0400" ] && label="Near close" || label=skip; flow_only=1 ;;
+            "0 20 * * 1-5")  [ "$offset" = "-0500" ] && label="Near close" || label=skip; flow_only=1 ;;
             "0 22 * * 1-5")  label="After close" ;;
             *)               label="Manual" ;;
           esac
-          echo "Scan type: $label"
+          echo "Scan type: $label (flow only: $flow_only)"
           echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "flow_only=$flow_only" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v6
         if: steps.gate.outputs.label != 'skip'
@@ -39,9 +46,29 @@ jobs:
           cache-dependency-path: setup-scanner/requirements.txt
       - if: steps.gate.outputs.label != 'skip'
         run: pip install -r requirements.txt
+
+      # Yahoo reports options open interest as 0 outside market hours. flow_scan.py saves the
+      # real numbers whenever it gets them (oi_saved/), and this keeps that folder between runs.
+      - name: Restore saved open interest
+        if: steps.gate.outputs.label != 'skip'
+        uses: actions/cache/restore@v4
+        with:
+          path: setup-scanner/oi_saved
+          key: oi-saved-${{ github.run_id }}
+          restore-keys: oi-saved-
+
       - if: steps.gate.outputs.label != 'skip'
         run: python scanner.py
         env:
           SCAN_LABEL: ${{ steps.gate.outputs.label }}
+          FLOW_ONLY: ${{ steps.gate.outputs.flow_only }}
+          FLOW_LOCAL_TZ: Pacific/Honolulu
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+
+      - name: Keep saved open interest for the next run
+        if: always() && steps.gate.outputs.label != 'skip' && hashFiles('setup-scanner/oi_saved/*.csv') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: setup-scanner/oi_saved
+          key: oi-saved-${{ github.run_id }}
